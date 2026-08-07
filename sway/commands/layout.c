@@ -188,6 +188,12 @@ struct cmd_results *cmd_layout(int argc, char **argv) {
 			workspace->layout = new_layout;
 			workspace_update_representation(workspace);
 		}
+		// A layout can be the thing that makes a container redundant: wrapping
+		// the workspace's children hands a sole wrapper the whole workspace, and
+		// retyping a tabbed container to a split turns its lone child from a tab
+		// into dead nesting. Normalize whichever container we ended up touching;
+		// a NULL one still lets the workspace itself be reconsidered.
+		container_normalize_from(container, workspace);
 		if (root->fullscreen_global) {
 			arrange_root();
 		} else {
