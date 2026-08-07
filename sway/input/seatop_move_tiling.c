@@ -355,8 +355,8 @@ static void finalize_move(struct sway_seat *seat) {
 	}
 
 	struct sway_container *con = e->con;
-	struct sway_container *old_parent = con->pending.parent;
-	struct sway_workspace *old_ws = con->pending.workspace;
+	struct sway_container_location old_location =
+		container_capture_location(con);
 	struct sway_node *target_node = e->target_node;
 	struct sway_workspace *new_ws = target_node->type == N_WORKSPACE ?
 		target_node->sway_workspace : target_node->sway_container->pending.workspace;
@@ -403,9 +403,7 @@ static void finalize_move(struct sway_seat *seat) {
 		workspace_insert_tiling(new_ws, con, after ? new_ws->tiling->length : 0);
 	}
 
-	if (old_parent) {
-		container_reap_empty(old_parent);
-	}
+	container_normalize_location(old_location);
 
 	// This is a bit dirty, but we'll set the dimensions to that of a sibling.
 	// I don't think there's any other way to make it consistent without
@@ -421,8 +419,10 @@ static void finalize_move(struct sway_seat *seat) {
 		con->height_fraction = sibling->height_fraction;
 	}
 
-	arrange_workspace(old_ws);
-	if (new_ws != old_ws) {
+	if (old_location.workspace && !old_location.workspace->node.destroying) {
+		arrange_workspace(old_location.workspace);
+	}
+	if (new_ws != old_location.workspace) {
 		arrange_workspace(new_ws);
 	}
 

@@ -522,22 +522,176 @@ void container_begin_destroy(struct sway_container *con) {
 	}
 }
 
-void container_reap_empty(struct sway_container *con) {
-	if (con->view) {
-		return;
-	}
-	struct sway_workspace *ws = con->pending.workspace;
-	while (con) {
-		if (con->pending.children->length) {
-			return;
-		}
+struct sway_container *container_reap_empty(struct sway_container *con) {
+	struct sway_workspace *ws = con ? con->pending.workspace : NULL;
+	while (con && !con->view && !con->node.destroying &&
+			con->pending.children->length == 0) {
 		struct sway_container *parent = con->pending.parent;
 		container_begin_destroy(con);
 		con = parent;
 	}
-	if (ws) {
+	if (!con && ws) {
 		workspace_consider_destroy(ws);
 	}
+	return con;
+}
+
+static bool layout_is_split(enum sway_container_layout layout) {
+	return layout == L_HORIZ || layout == L_VERT;
+}
+
+static void container_transfer_marks(struct sway_container *from,
+		struct sway_container *to) {
+	if (from->marks->length == 0) {
+		return;
+	}
+
+	for (int i = 0; i < from->marks->length; ++i) {
+		container_add_mark(to, from->marks->items[i]);
+	}
+	container_clear_marks(from);
+	container_update_marks(from);
+	container_update_marks(to);
+}
+
+static bool find_any_fullscreen(struct sway_container *con, void *data) {
+	return con->pending.fullscreen_mode != FULLSCREEN_NONE;
+}
+
+/**
+ * A workspace holding nothing but one split wrapper hands that wrapper its
+ * whole box, so the wrapper's children divide the workspace exactly as they
+ * would sitting in it directly:
+ *
+ *   WS_splith[splith[a, b, c]] renders as WS_splith[a, b, c]
+ *
+ * Hoist them. A workspace is not a container and cannot be replaced by its
+ * child, so a lone child's wrapper moves its orientation into the workspace
+ * instead: WS_splith[splitv[a]] becomes WS_splitv[a], not a bare a, and the
+ * next window still lands below a. A wrapper with several children is hoisted
+ * only when it already runs the workspace's way. WS_splith[splitv[a, b]] stays:
+ * hoisting it would retype the workspace, moving where a window opened at
+ * workspace level lands, and `layout splitv` on a top-level view relies on the
+ * wrapper it makes staying put (cmd_layout's i3 note).
+ *
+ * Some wrappers stay. A tabbed or stacked wrapper draws a tab bar the workspace
+ * would not. A wrapper under a tabbed or stacked *workspace* is the content of
+ * its one tab: hoisting would overwrite the workspace's own layout with the
+ * wrapper's, taking the tab bar with it. And a multi-child wrapper that owns
+ * fullscreen, scratchpad, or mark state has no single replacement that can
+ * inherit that state without changing its scope.
+ */
+static void workspace_flatten_sole_wrapper(struct sway_workspace *ws) {
+	bool changed = false;
+	while (ws && !ws->node.destroying && ws->tiling->length == 1 &&
+			(ws->layout == L_HORIZ || ws->layout == L_VERT)) {
+		struct sway_container *wrapper = ws->tiling->items[0];
+		if (wrapper->view || !layout_is_split(wrapper->pending.layout) ||
+				wrapper->pending.children->length == 0) {
+			break;
+		}
+		if (wrapper->pending.children->length > 1 &&
+				(wrapper->pending.layout != ws->layout ||
+				wrapper->pending.fullscreen_mode != FULLSCREEN_NONE ||
+				container_find_child(wrapper, find_any_fullscreen, NULL) ||
+				wrapper->scratchpad || wrapper->marks->length > 0)) {
+			// Fullscreen, scratchpad membership, and marks belong to the wrapper
+			// alone, and with several children there is no one child to hand them
+			// to. container_replace() carries the first two over in the lone-child
+			// case, and marks are transferred explicitly below.
+			//
+			// The fullscreen check also refuses when any *descendant* is
+			// fullscreen. The multi-child hoist below detaches each child and
+			// reinserts it: since 7e8b4d36 upstream's container_detach() clears
+			// ws->fullscreen when the detached subtree holds the fullscreen
+			// container, and container_handle_fullscreen_reparent() (called from
+			// workspace_insert_tiling_direct()) restores it. The hoist must not
+			// depend on that detach/reparent pairing staying exactly matched, so
+			// it declines to run across a fullscreen descendant at all.
+			break;
+		}
+		ws->layout = wrapper->pending.layout;
+		if (wrapper->pending.children->length == 1) {
+			struct sway_container *child = wrapper->pending.children->items[0];
+			container_transfer_marks(wrapper, child);
+			container_replace(wrapper, child);
+		} else {
+			// Each insert shifts the wrapper right, so advance idx to land the
+			// hoisted children in their original order.
+			int idx = 0;
+			while (wrapper->pending.children->length) {
+				struct sway_container *child = wrapper->pending.children->items[0];
+				container_detach(child);
+				workspace_insert_tiling_direct(ws, child, idx++);
+			}
+		}
+		container_begin_destroy(wrapper);
+		changed = true;
+	}
+	if (changed && ws) {
+		workspace_update_representation(ws);
+		node_set_dirty(&ws->node);
+	}
+}
+
+/**
+ * `con` is down to a single child, so con hands that child its whole box and
+ * contributes no geometry of its own:
+ *
+ *   H[V[a, b]] -> V[a, b]      V[a] -> a
+ *
+ * Replace it with the child, which may be redundant in turn. Two wrappers are
+ * kept. One the split command made (explicit_split) is where the next window
+ * lands: view_map() opens beside the focused node, which is the view after
+ * `split v` on it or the group after `focus parent`, and the wrapper is that
+ * node's split. Wrappers other code made for a sibling that has since left
+ * carry no such intent. And a tabbed or stacked con draws a tab bar, which is
+ * geometry however few children it has.
+ */
+static void container_collapse_only_child(struct sway_container *con) {
+	while (con && !con->view && !con->node.destroying &&
+			!con->explicit_split && layout_is_split(con->pending.layout) &&
+			con->pending.children->length == 1) {
+		struct sway_container *child = con->pending.children->items[0];
+		// container_replace() hands the child con's slot along with its width
+		// and height fractions, so the tree renders exactly as it did.
+		container_transfer_marks(con, child);
+		container_replace(con, child);
+		container_begin_destroy(con);
+		con = child;
+	}
+}
+
+void container_normalize_from(struct sway_container *con,
+		struct sway_workspace *workspace) {
+	con = container_reap_empty(con);
+
+	// Only containers on the chain from the change up to the workspace can have
+	// been made redundant by it, so walk that chain. Rescanning the workspace
+	// would visit the same containers plus every unrelated one.
+	while (con && !con->node.destroying) {
+		// Take the parent before collapsing: con itself may not survive.
+		struct sway_container *parent = con->pending.parent;
+		container_collapse_only_child(con);
+		con = parent;
+	}
+
+	workspace_flatten_sole_wrapper(workspace);
+	if (workspace && !workspace->node.destroying) {
+		workspace_consider_destroy(workspace);
+	}
+}
+
+struct sway_container_location container_capture_location(
+		struct sway_container *container) {
+	return (struct sway_container_location) {
+		.parent = container->pending.parent,
+		.workspace = container->pending.workspace,
+	};
+}
+
+void container_normalize_location(struct sway_container_location location) {
+	container_normalize_from(location.parent, location.workspace);
 }
 
 struct sway_container *container_flatten(struct sway_container *container) {
@@ -963,7 +1117,8 @@ void container_set_floating(struct sway_container *container, bool enable) {
 	bool set_focus = focus == container;
 
 	if (enable) {
-		struct sway_container *old_parent = container->pending.parent;
+		struct sway_container_location old_location =
+			container_capture_location(container);
 		container_detach(container);
 		workspace_add_floating(workspace, container);
 		if (container->view) {
@@ -980,13 +1135,11 @@ void container_set_floating(struct sway_container *container, bool enable) {
 		}
 		container_floating_set_default_size(container);
 		container_floating_resize_and_center(container);
-		if (old_parent) {
-			if (set_focus) {
-				seat_set_raw_focus(seat, &old_parent->node);
-				seat_set_raw_focus(seat, &container->node);
-			}
-			container_reap_empty(old_parent);
+		if (old_location.parent && set_focus) {
+			seat_set_raw_focus(seat, &old_location.parent->node);
+			seat_set_raw_focus(seat, &container->node);
 		}
+		container_normalize_location(old_location);
 	} else {
 		// Returning to tiled
 		if (container->scratchpad) {
@@ -1708,68 +1861,6 @@ bool container_is_sticky(struct sway_container *con) {
 
 bool container_is_sticky_or_child(struct sway_container *con) {
 	return container_is_sticky(container_toplevel_ancestor(con));
-}
-
-static bool is_parallel(enum sway_container_layout first,
-		enum sway_container_layout second) {
-	switch (first) {
-	case L_TABBED:
-	case L_HORIZ:
-		return second == L_TABBED || second == L_HORIZ;
-	case L_STACKED:
-	case L_VERT:
-		return second == L_STACKED || second == L_VERT;
-	default:
-		return false;
-	}
-}
-
-static bool container_is_squashable(struct sway_container *con,
-		struct sway_container *child) {
-	enum sway_container_layout gp_layout = container_parent_layout(con);
-	return (con->pending.layout == L_HORIZ || con->pending.layout == L_VERT) &&
-		(child->pending.layout == L_HORIZ || child->pending.layout == L_VERT) &&
-		!is_parallel(con->pending.layout, child->pending.layout) &&
-		is_parallel(gp_layout, child->pending.layout);
-}
-
-static void container_squash_children(struct sway_container *con) {
-	for (int i = 0; i < con->pending.children->length; i++) {
-		struct sway_container *child = con->pending.children->items[i];
-		i += container_squash(child);
-	}
-}
-
-int container_squash(struct sway_container *con) {
-	if (!con->pending.children) {
-		return 0;
-	}
-	if (con->pending.children->length != 1) {
-		container_squash_children(con);
-		return 0;
-	}
-	struct sway_container *child = con->pending.children->items[0];
-	int idx = container_sibling_index(con);
-	int change = 0;
-	if (container_is_squashable(con, child)) {
-		// con and child are a redundant H/V pair. Destroy them.
-		while (child->pending.children->length) {
-			struct sway_container *current = child->pending.children->items[0];
-			container_detach(current);
-			if (con->pending.parent) {
-				container_insert_child(con->pending.parent, current, idx);
-			} else {
-				workspace_insert_tiling_direct(con->pending.workspace, current, idx);
-			}
-			change++;
-		}
-		// This will also destroy con because child was its only child
-		container_reap_empty(child);
-		change--;
-	} else {
-		container_squash_children(con);
-	}
-	return change;
 }
 
 static void swap_places(struct sway_container *con1,
