@@ -53,6 +53,12 @@ static void unmanaged_handle_set_geometry(struct wl_listener *listener, void *da
 	wlr_scene_node_set_position(&surface->surface_scene->buffer->node, xsurface->x, xsurface->y);
 }
 
+static bool unmanaged_may_take_focus(struct sway_seat *seat,
+		struct wlr_xwayland_surface *xsurface) {
+	struct sway_container *focus = seat_get_focused_container(seat);
+	return !focus || !focus->view || focus->view->pid == xsurface->pid;
+}
+
 static void unmanaged_handle_map(struct wl_listener *listener, void *data) {
 	struct sway_xwayland_unmanaged *surface =
 		wl_container_of(listener, surface, map);
@@ -73,6 +79,9 @@ static void unmanaged_handle_map(struct wl_listener *listener, void *data) {
 
 	if (wlr_xwayland_surface_override_redirect_wants_focus(xsurface)) {
 		struct sway_seat *seat = input_manager_current_seat();
+		if (!unmanaged_may_take_focus(seat, xsurface)) {
+			return;
+		}
 		struct wlr_xwayland *xwayland = server.xwayland.wlr_xwayland;
 		wlr_xwayland_set_seat(xwayland, seat->wlr_seat);
 		seat_set_focus_surface(seat, xsurface->surface, false);
@@ -119,8 +128,7 @@ static void unmanaged_handle_request_activate(struct wl_listener *listener, void
 		return;
 	}
 	struct sway_seat *seat = input_manager_current_seat();
-	struct sway_container *focus = seat_get_focused_container(seat);
-	if (focus && focus->view && focus->view->pid != xsurface->pid) {
+	if (!unmanaged_may_take_focus(seat, xsurface)) {
 		return;
 	}
 
