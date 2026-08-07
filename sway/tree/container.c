@@ -1150,6 +1150,7 @@ void container_set_floating(struct sway_container *container, bool enable) {
 			seat_get_focus_inactive_tiling(seat, workspace);
 		if (reference) {
 			if (reference->view) {
+				container_split_long_side(reference);
 				container_add_sibling(reference, container, 1);
 			} else {
 				container_add_child(reference, container);
@@ -2035,4 +2036,41 @@ void container_swap(struct sway_container *con1, struct sway_container *con2) {
 	if (fs2) {
 		container_set_fullscreen(con1, fs2);
 	}
+}
+
+void container_split_long_side(struct sway_container *con) {
+	// container_split() transfers fullscreen to the wrapper it creates. The
+	// caller then adds the new sibling inside that wrapper, which would widen
+	// fullscreen from con to both views.
+	if (con->pending.fullscreen_mode != FULLSCREEN_NONE) {
+		return;
+	}
+	// Ask about the parent: autotiling only needs to wrap containers that sit in
+	// an existing split.
+	enum sway_container_layout parent_layout = container_parent_layout(con);
+	if (!layout_is_split(parent_layout)) {
+		return;
+	}
+	// The axis choice needs real geometry. Both current callers pass an
+	// already-arranged container, but nothing enforces that; on a degenerate
+	// box the "longer side" is meaningless, so do nothing rather than default
+	// to L_HORIZ.
+	if (con->pending.width == 0 && con->pending.height == 0) {
+		return;
+	}
+	enum sway_container_layout desired =
+		con->pending.width >= con->pending.height ? L_HORIZ : L_VERT;
+	// The parent already runs along the desired axis, so the new sibling can
+	// join it; splitting would wrap con in a redundant same-orientation
+	// container.
+	if (parent_layout == desired) {
+		return;
+	}
+	// When con is its parent's sole child, container_split() does not create a
+	// wrapper at all: its singleton short-circuit (the i3 "don't split
+	// singleton H/V containers" rule) retypes the *parent's* layout to
+	// `desired` and returns con unchanged. So on a sole-child container this
+	// helper mutates a node it was not handed -- visually identical, since the
+	// parent holds only con, but worth knowing before adding callers.
+	container_split(con, desired);
 }
