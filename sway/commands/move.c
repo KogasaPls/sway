@@ -134,7 +134,6 @@ static void container_move_to_container_from_direction(
 			}
 			container->pending.width = container->pending.height = 0;
 			container->width_fraction = container->height_fraction = 0;
-			workspace_squash(destination->pending.workspace);
 		}
 		return;
 	}
@@ -147,7 +146,6 @@ static void container_move_to_container_from_direction(
 		container_insert_child(destination, container, index);
 		container->pending.width = container->pending.height = 0;
 		container->width_fraction = container->height_fraction = 0;
-		workspace_squash(destination->pending.workspace);
 		return;
 	}
 
@@ -195,10 +193,10 @@ static void container_move_to_workspace_from_direction(
 			move_dir);
 }
 
-static void container_move_to_workspace(struct sway_container *container,
+static bool container_move_to_workspace(struct sway_container *container,
 		struct sway_workspace *workspace) {
 	if (container->pending.workspace == workspace) {
-		return;
+		return false;
 	}
 	struct sway_workspace *old_workspace = container->pending.workspace;
 	if (container_is_floating(container)) {
@@ -218,6 +216,15 @@ static void container_move_to_workspace(struct sway_container *container,
 				container->transform = workspace_box;
 			}
 		}
+		if (container->view) {
+			ipc_event_window(container, "move");
+		}
+		workspace_detect_urgent(old_workspace);
+		workspace_detect_urgent(workspace);
+		workspace_focus_fullscreen(workspace);
+		// Floating containers are top-level, so this move cannot expose a
+		// redundant parent in the tiling tree.
+		return false;
 	} else {
 		container_detach(container);
 		if (workspace_is_empty(workspace) && container->pending.children) {
@@ -228,25 +235,26 @@ static void container_move_to_workspace(struct sway_container *container,
 			container->width_fraction = container->height_fraction = 0;
 			workspace_add_tiling(workspace, container);
 		}
+		if (container->view) {
+			ipc_event_window(container, "move");
+		}
+		workspace_detect_urgent(old_workspace);
 		container_update_representation(container);
+		workspace_detect_urgent(workspace);
+		workspace_focus_fullscreen(workspace);
+		return true;
 	}
-	if (container->view) {
-		ipc_event_window(container, "move");
-	}
-	workspace_detect_urgent(old_workspace);
-	workspace_detect_urgent(workspace);
-	workspace_focus_fullscreen(workspace);
 }
 
-static void container_move_to_container(struct sway_container *container,
+static bool container_move_to_container(struct sway_container *container,
 		struct sway_container *destination) {
 	if (container == destination
 			|| container_has_ancestor(destination, container)) {
-		return;
+		return false;
 	}
 	if (container_is_floating(container)) {
-		container_move_to_workspace(container, destination->pending.workspace);
-		return;
+		return container_move_to_workspace(container,
+				destination->pending.workspace);
 	}
 	struct sway_workspace *old_workspace = container->pending.workspace;
 
@@ -272,6 +280,7 @@ static void container_move_to_container(struct sway_container *container,
 	if (old_workspace && old_workspace != destination->pending.workspace) {
 		workspace_detect_urgent(old_workspace);
 	}
+	return true;
 }
 
 static bool container_move_to_next_output(struct sway_container *container,
@@ -288,8 +297,7 @@ static bool container_move_to_next_output(struct sway_container *container,
 			container_move_to_workspace_from_direction(container, ws, move_dir);
 			return true;
 		case FULLSCREEN_WORKSPACE:
-			container_move_to_workspace(container, ws);
-			return true;
+			return container_move_to_workspace(container, ws);
 		case FULLSCREEN_GLOBAL:
 			return false;
 		}
@@ -393,7 +401,6 @@ static bool container_move_in_direction(struct sway_container *container,
 				ancestor->pending.workspace->output, move_dir);
 	} else {
 		// Container will be promoted
-		struct sway_container *old_parent = container->pending.parent;
 		if (ancestor->pending.parent) {
 			// Container will move in with its parent
 			container_insert_child(ancestor->pending.parent, container,
@@ -406,10 +413,6 @@ static bool container_move_in_direction(struct sway_container *container,
 		}
 		ancestor->pending.height = ancestor->pending.width = 0;
 		ancestor->height_fraction = ancestor->width_fraction = 0;
-		if (old_parent) {
-			container_reap_empty(old_parent);
-		}
-		workspace_squash(container->pending.workspace);
 		return true;
 	}
 }
@@ -441,8 +444,9 @@ static struct cmd_results *cmd_move_container(bool no_auto_back_and_forth,
 	}
 
 	struct sway_seat *seat = config->handler_context.seat;
-	struct sway_container *old_parent = container->pending.parent;
-	struct sway_workspace *old_ws = container->pending.workspace;
+	struct sway_container_location old_location =
+		container_capture_location(container);
+	struct sway_workspace *old_ws = old_location.workspace;
 	struct sway_output *old_output = old_ws ? old_ws->output : NULL;
 	struct sway_node *destination = NULL;
 
@@ -550,6 +554,19 @@ static struct cmd_results *cmd_move_container(bool no_auto_back_and_forth,
 	if (new_output && old_output != new_output) {
 		new_output_last_ws = output_get_active_workspace(new_output);
 	}
+	bool tiled_tree_changed = false;
+
+	// Capture destination workspace before any normalization may destroy
+	// the destination container node (e.g. flattening the container if it
+	// becomes a singleton after the move).
+	struct sway_workspace *dest_ws = NULL;
+	if (destination->type == N_WORKSPACE) {
+		dest_ws = destination->sway_workspace;
+	} else if (destination->type == N_CONTAINER) {
+		dest_ws = destination->sway_container->pending.workspace;
+	} else if (destination->type == N_OUTPUT) {
+		dest_ws = output_get_active_workspace(destination->sway_output);
+	}
 
 	// save focus, in case it needs to be restored
 	struct sway_node *focus = seat_get_focus(seat);
@@ -561,7 +578,8 @@ static struct cmd_results *cmd_move_container(bool no_auto_back_and_forth,
 	}
 	switch (destination->type) {
 	case N_WORKSPACE:
-		container_move_to_workspace(container, destination->sway_workspace);
+		tiled_tree_changed = container_move_to_workspace(container,
+				destination->sway_workspace);
 		break;
 	case N_OUTPUT: {
 			struct sway_output *output = destination->sway_output;
@@ -570,11 +588,13 @@ static struct cmd_results *cmd_move_container(bool no_auto_back_and_forth,
 				return cmd_results_new(CMD_FAILURE,
 						"Expected output to have a workspace");
 			}
-			container_move_to_workspace(container, ws);
+			tiled_tree_changed =
+				container_move_to_workspace(container, ws);
 		}
 		break;
 	case N_CONTAINER:
-		container_move_to_container(container, destination->sway_container);
+		tiled_tree_changed = container_move_to_container(container,
+				destination->sway_container);
 		break;
 	case N_ROOT:
 		break;
@@ -595,23 +615,39 @@ static struct cmd_results *cmd_move_container(bool no_auto_back_and_forth,
 		seat_set_raw_focus(seat, new_output_last_focus);
 	}
 
+	if (tiled_tree_changed) {
+		container_normalize_location(old_location);
+	}
+
 	// restore focus
-	if (focus == &container->node) {
+	if (focus == &container->node || (focus && focus->destroying)) {
 		focus = NULL;
-		if (old_parent) {
-			focus = seat_get_focus_inactive(seat, &old_parent->node);
+		// Normalization may also have destroyed the focused old ancestor.
+		// Destroyed nodes are not freed until the transaction completes, so
+		// it is safe to inspect the flag and choose a surviving fallback.
+		if (old_location.parent && !old_location.parent->node.destroying) {
+			focus = seat_get_focus_inactive(seat, &old_location.parent->node);
 		}
-		if (!focus && old_ws) {
+		if (!focus && old_ws && !old_ws->node.destroying) {
 			focus = seat_get_focus_inactive(seat, &old_ws->node);
+		}
+		// Both fallbacks can be destroying at once (the move emptied the old
+		// parent chain and the old workspace was destroyed with it). Upstream
+		// never called seat_set_focus(seat, NULL) here; keep that property by
+		// falling back to the most recently focused surviving node.
+		if (!focus) {
+			focus = seat_get_focus_inactive(seat, &root->node);
 		}
 	}
 	seat_set_focus(seat, focus);
 
 	// clean-up, destroying parents if the container was the last child
-	if (old_parent) {
-		container_reap_empty(old_parent);
-	} else if (old_ws) {
-		workspace_consider_destroy(old_ws);
+	if (!tiled_tree_changed) {
+		if (old_location.parent) {
+			container_reap_empty(old_location.parent);
+		} else if (old_ws) {
+			workspace_consider_destroy(old_ws);
+		}
 	}
 
 	// arrange windows
@@ -621,7 +657,9 @@ static struct cmd_results *cmd_move_container(bool no_auto_back_and_forth,
 		if (old_ws && !old_ws->node.destroying) {
 			arrange_workspace(old_ws);
 		}
-		arrange_node(node_get_parent(destination));
+		if (dest_ws && dest_ws != old_ws && !dest_ws->node.destroying) {
+			arrange_workspace(dest_ws);
+		}
 	}
 
 	return cmd_results_new(CMD_SUCCESS, NULL);
@@ -709,28 +747,26 @@ static struct cmd_results *cmd_move_in_direction(
 		container_floating_move_to(container, lx, ly);
 		return cmd_results_new(CMD_SUCCESS, NULL);
 	}
-	struct sway_workspace *old_ws = container->pending.workspace;
-	struct sway_container *old_parent = container->pending.parent;
+	struct sway_container_location old_location =
+		container_capture_location(container);
+	struct sway_workspace *old_ws = old_location.workspace;
 
 	if (!container_move_in_direction(container, direction)) {
 		// Container didn't move
 		return cmd_results_new(CMD_SUCCESS, NULL);
 	}
 
-	// clean-up, destroying parents if the container was the last child
-	if (old_parent) {
-		container_reap_empty(old_parent);
-	} else if (old_ws) {
-		workspace_consider_destroy(old_ws);
-	}
+	container_normalize_location(old_location);
 
 	struct sway_workspace *new_ws = container->pending.workspace;
 
 	if (root->fullscreen_global) {
 		arrange_root();
 	} else {
-		arrange_workspace(old_ws);
-		if (new_ws != old_ws) {
+		if (old_ws && !old_ws->node.destroying) {
+			arrange_workspace(old_ws);
+		}
+		if (new_ws != old_ws && !new_ws->node.destroying) {
 			arrange_workspace(new_ws);
 		}
 	}

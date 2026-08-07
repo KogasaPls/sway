@@ -939,11 +939,10 @@ void workspace_detach(struct sway_workspace *workspace) {
 struct sway_container *workspace_add_tiling(struct sway_workspace *workspace,
 		struct sway_container *con) {
 	if (con->pending.workspace) {
-		struct sway_container *old_parent = con->pending.parent;
+		struct sway_container_location old_location =
+			container_capture_location(con);
 		container_detach(con);
-		if (old_parent) {
-			container_reap_empty(old_parent);
-		}
+		container_normalize_location(old_location);
 	}
 	if (config->default_layout != L_NONE) {
 		con = container_split(con, config->default_layout);
@@ -1119,13 +1118,6 @@ size_t workspace_num_sticky_containers(struct sway_workspace *ws) {
 	size_t count = 0;
 	workspace_for_each_container(ws, count_sticky_containers, &count);
 	return count;
-}
-
-void workspace_squash(struct sway_workspace *workspace) {
-	for (int i = 0; i < workspace->tiling->length; i++) {
-		struct sway_container *child = workspace->tiling->items[i];
-		i += container_squash(child);
-	}
 }
 
 void workspace_move_to_output(struct sway_workspace *workspace,

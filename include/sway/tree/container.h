@@ -104,6 +104,8 @@ struct sway_container {
 
 	enum sway_container_layout prev_split_layout;
 
+	bool explicit_split;
+
 	// Whether stickiness has been enabled on this container. Use
 	// `container_is_sticky_[or_child]` rather than accessing this field
 	// directly; it'll also check that the container is floating.
@@ -174,7 +176,42 @@ struct sway_container *container_obstructing_fullscreen_container(struct sway_co
 bool container_has_ancestor(struct sway_container *container,
 		struct sway_container *ancestor);
 
-void container_reap_empty(struct sway_container *con);
+/**
+ * Destroy `con` and its ancestors while they are empty, and return the first
+ * one that is not (NULL once the workspace is reached). Pass a container that
+ * has just lost a child.
+ */
+struct sway_container *container_reap_empty(struct sway_container *con);
+
+/**
+ * Normalize the tiling tree along the chain from `con` up to the workspace,
+ * after a change has landed there.
+ *
+ * This destroys empty ancestors and flattens the redundant singleton split
+ * wrappers a change can expose or create. Only that chain can have been made
+ * redundant, so only that chain is walked.
+ *
+ * Call this *after* the mutation, never before: a caller still holding pointers
+ * or indices into the pre-mutation tree will have them invalidated underneath
+ * it. Pass the removed container's old parent and old workspace, captured
+ * before the detach, or the container a change was made under. A NULL `con`
+ * still reconsiders the workspace itself.
+ *
+ * view_close() is asynchronous: normalize in view_unmap() once the client
+ * unmaps, not when the close request leaves the tree unchanged.
+ */
+void container_normalize_from(struct sway_container *con,
+		struct sway_workspace *workspace);
+
+struct sway_container_location {
+	struct sway_container *parent;
+	struct sway_workspace *workspace;
+};
+
+struct sway_container_location container_capture_location(
+		struct sway_container *container);
+
+void container_normalize_location(struct sway_container_location location);
 
 struct sway_container *container_flatten(struct sway_container *container);
 
@@ -344,19 +381,6 @@ bool container_is_scratchpad_hidden_or_child(struct sway_container *con);
 bool container_is_sticky(struct sway_container *con);
 
 bool container_is_sticky_or_child(struct sway_container *con);
-
-/**
- * This will destroy pairs of redundant H/V splits
- * e.g. H[V[H[app app]] app] -> H[app app app]
- * The middle "V[H[" are eliminated by a call to container_squash
- * on the V[ con. It's grandchildren are added to its parent.
- *
- * This function is roughly equivalent to i3's tree_flatten here:
- * https://github.com/i3/i3/blob/1f0c628cde40cf87371481041b7197344e0417c6/src/tree.c#L651
- *
- * Returns the number of new containers added to the parent
- */
-int container_squash(struct sway_container *con);
 
 void container_arrange_title_bar(struct sway_container *con);
 

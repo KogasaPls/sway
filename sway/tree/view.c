@@ -988,21 +988,18 @@ void view_unmap(struct sway_view *view) {
 		view->foreign_toplevel = NULL;
 	}
 
-	struct sway_container *parent = view->container->pending.parent;
-	struct sway_workspace *ws = view->container->pending.workspace;
+	struct sway_container_location old_location =
+		container_capture_location(view->container);
 	container_begin_destroy(view->container);
-	if (parent) {
-		container_reap_empty(parent);
-	} else if (ws) {
-		workspace_consider_destroy(ws);
-	}
+	container_normalize_location(old_location);
 
 	if (root->fullscreen_global) {
 		// Container may have been a child of the root fullscreen container
 		arrange_root();
-	} else if (ws && !ws->node.destroying) {
-		arrange_workspace(ws);
-		workspace_detect_urgent(ws);
+	} else if (old_location.workspace &&
+			!old_location.workspace->node.destroying) {
+		arrange_workspace(old_location.workspace);
+		workspace_detect_urgent(old_location.workspace);
 	}
 
 	struct sway_seat *seat;
