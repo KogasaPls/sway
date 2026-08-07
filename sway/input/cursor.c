@@ -1269,6 +1269,11 @@ const char *get_mouse_button_name(uint32_t button) {
 }
 
 static void warp_to_constraint_cursor_hint(struct sway_cursor *cursor) {
+	// mouse_warping none also covers protocol-initiated warps: do not let a
+	// client teleport the cursor via its constraint cursor hint on unlock.
+	if (config->mouse_warping == WARP_NO) {
+		return;
+	}
 	struct wlr_pointer_constraint_v1 *constraint = cursor->active_constraint;
 
 	if (constraint->current.cursor_hint.enabled) {

@@ -843,6 +843,9 @@ The default colors are:
 	If _output_ is specified, the mouse will be moved to new outputs as you
 	move focus between them. If _container_ is specified, the mouse will be
 	moved to the middle of the container on switch. Default is _output_.
+	If _none_ is specified, clients are additionally prevented from warping
+	the cursor via their pointer-constraint cursor hint when a pointer lock
+	is released; the cursor stays where the compositor last had it.
 
 *no_focus* <criteria>
 	Prevents windows matching <criteria> from being focused automatically when
