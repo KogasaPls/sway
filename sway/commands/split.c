@@ -18,7 +18,10 @@ static struct cmd_results *do_split(int layout) {
 			return cmd_results_new(CMD_FAILURE,
 					"Cannot split a hidden scratchpad container");
 		}
-		container_split(con, layout);
+		struct sway_container *wrapper = container_split(con, layout);
+		if (wrapper != con) {
+			wrapper->explicit_split = true;
+		}
 	} else {
 		workspace_split(ws, layout);
 	}
