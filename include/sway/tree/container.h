@@ -382,6 +382,8 @@ bool container_is_sticky(struct sway_container *con);
 
 bool container_is_sticky_or_child(struct sway_container *con);
 
+void container_split_long_side(struct sway_container *con);
+
 void container_arrange_title_bar(struct sway_container *con);
 
 void container_update(struct sway_container *con);

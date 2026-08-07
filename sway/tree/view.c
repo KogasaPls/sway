@@ -895,6 +895,9 @@ void view_map(struct sway_view *view, struct wlr_surface *wlr_surface,
 
 	struct sway_container *container = view->container;
 	if (target_sibling) {
+		if (target_sibling->view || target_sibling->pending.children->length == 1) {
+			container_split_long_side(target_sibling);
+		}
 		container_add_sibling(target_sibling, container, 1);
 	} else if (ws) {
 		container = workspace_add_tiling(ws, container);
