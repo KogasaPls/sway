@@ -250,21 +250,49 @@ void output_configure_scene(struct sway_output *output,
 	}
 }
 
-static bool output_can_tear(struct sway_output *output) {
+static struct sway_view *output_fullscreen_view(struct sway_output *output) {
 	struct sway_workspace *workspace = output->current.active_workspace;
 	if (!workspace) {
-		return false;
+		return NULL;
 	}
 
 	struct sway_container *fullscreen_con = root->fullscreen_global;
 	if (!fullscreen_con) {
 		fullscreen_con = workspace->current.fullscreen;
 	}
-	if (fullscreen_con && fullscreen_con->view) {
-		return (output->allow_tearing && view_can_tear(fullscreen_con->view));
+	return fullscreen_con ? fullscreen_con->view : NULL;
+}
+
+bool output_auto_adaptive_sync_wanted(struct sway_output *output) {
+	return !server.session_lock.lock && output_fullscreen_view(output) != NULL;
+}
+
+static bool output_can_tear(struct sway_output *output) {
+	struct sway_view *view = output_fullscreen_view(output);
+	return view && output->allow_tearing && view_can_tear(view);
+}
+
+static void output_update_auto_adaptive_sync(struct sway_output *output,
+		struct wlr_output_state *pending) {
+	struct wlr_output *wlr_output = output->wlr_output;
+	bool wanted = output_auto_adaptive_sync_wanted(output);
+	if (!wanted) {
+		output->adaptive_sync_auto_rejected = false;
 	}
 
-	return false;
+	bool enabled = wlr_output->adaptive_sync_status == WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED;
+	if (!wlr_output->adaptive_sync_supported || enabled == wanted ||
+			(wanted && output->adaptive_sync_auto_rejected)) {
+		return;
+	}
+
+	wlr_output_state_set_adaptive_sync_enabled(pending, wanted);
+	if (!wlr_output_test_state(wlr_output, pending)) {
+		sway_log(SWAY_DEBUG, "Output test failed on '%s', leaving adaptive sync %s",
+			wlr_output->name, enabled ? "enabled" : "disabled");
+		pending->committed &= ~WLR_OUTPUT_STATE_ADAPTIVE_SYNC_ENABLED;
+		output->adaptive_sync_auto_rejected = wanted;
+	}
 }
 
 // With adaptive sync every commit starts a refresh cycle, so a commit that
@@ -325,6 +353,10 @@ static int output_repaint_timer_handler(void *data) {
 	if (!wlr_scene_output_build_state(output->scene_output, &pending, &opts)) {
 		wlr_output_state_finish(&pending);
 		return 0;
+	}
+
+	if (output->adaptive_sync_auto) {
+		output_update_auto_adaptive_sync(output, &pending);
 	}
 
 	if (output_can_tear(output)) {
@@ -663,7 +695,14 @@ static struct output_config *output_config_for_config_head(
 	oc->y = config_head->state.y;
 	oc->transform = config_head->state.transform;
 	oc->scale = config_head->state.scale;
-	oc->adaptive_sync = config_head->state.adaptive_sync_enabled;
+	// A head repeats the current state of fields the client left alone;
+	// storing that would replace adaptive_sync auto with on or off.
+	bool adaptive_sync_enabled = config_head->state.output->adaptive_sync_status ==
+		WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED;
+	if (config_head->state.adaptive_sync_enabled != adaptive_sync_enabled) {
+		oc->adaptive_sync = config_head->state.adaptive_sync_enabled ?
+			ADAPTIVE_SYNC_ON : ADAPTIVE_SYNC_OFF;
+	}
 	return oc;
 }
 

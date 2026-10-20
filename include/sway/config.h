@@ -261,6 +261,13 @@ enum scale_filter_mode {
 	SCALE_FILTER_SMART,
 };
 
+enum adaptive_sync_mode {
+	ADAPTIVE_SYNC_UNSET = -1,
+	ADAPTIVE_SYNC_OFF,
+	ADAPTIVE_SYNC_ON,
+	ADAPTIVE_SYNC_AUTO, // enabled while a fullscreen view is on the output
+};
+
 enum render_bit_depth {
 	RENDER_BIT_DEPTH_DEFAULT, // the default is currently 8 for SDR, 10 for HDR
 	RENDER_BIT_DEPTH_6,
@@ -293,7 +300,7 @@ struct output_config {
 	int32_t transform;
 	enum wl_output_subpixel subpixel;
 	int max_render_time; // In milliseconds
-	int adaptive_sync;
+	enum adaptive_sync_mode adaptive_sync;
 	enum render_bit_depth render_bit_depth;
 	enum color_profile color_profile;
 	struct wlr_color_transform *color_transform;
