@@ -73,6 +73,8 @@ struct sway_output {
 	struct timespec last_content_commit;
 
 	bool allow_tearing;
+	bool adaptive_sync_auto;
+	bool adaptive_sync_auto_rejected;
 	bool hdr;
 };
 
@@ -119,6 +121,8 @@ void output_enable(struct sway_output *output);
 void output_disable(struct sway_output *output);
 
 struct sway_workspace *output_get_active_workspace(struct sway_output *output);
+
+bool output_auto_adaptive_sync_wanted(struct sway_output *output);
 
 void output_for_each_workspace(struct sway_output *output,
 		void (*f)(struct sway_workspace *ws, void *data), void *data);
