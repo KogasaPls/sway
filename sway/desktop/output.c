@@ -267,6 +267,37 @@ static bool output_can_tear(struct sway_output *output) {
 	return false;
 }
 
+// With adaptive sync every commit starts a refresh cycle, so a commit that
+// only moves the hardware cursor raises the refresh rate between content
+// frames. Content at 30 Hz or more carries the cursor with its own frames.
+#define CURSOR_FRAME_MAX_DELAY_NSEC (1000000000 / 30)
+
+static bool output_defer_cursor_frame(struct sway_output *output) {
+	if (output->wlr_output->adaptive_sync_status != WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED ||
+			wlr_scene_output_content_changed(output->scene_output)) {
+		return false;
+	}
+
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	int64_t elapsed_nsec =
+		(int64_t)(now.tv_sec - output->last_content_commit.tv_sec) * 1000000000 +
+		(now.tv_nsec - output->last_content_commit.tv_nsec);
+	if (elapsed_nsec >= CURSOR_FRAME_MAX_DELAY_NSEC) {
+		return false;
+	}
+
+	// No page flip will pace the next frame event, so retry one refresh period
+	// later from the repaint timer and hold frame_pending meanwhile, as
+	// handle_frame does for max_render_time. Otherwise a client committing
+	// frame callbacks without damage would cycle through idle frame events.
+	struct wlr_output *wlr_output = output->wlr_output;
+	int delay_msec = wlr_output->refresh > 0 ? 1000000 / wlr_output->refresh : 16;
+	wlr_output->frame_pending = true;
+	wl_event_source_timer_update(output->repaint_timer, delay_msec > 0 ? delay_msec : 1);
+	return true;
+}
+
 static int output_repaint_timer_handler(void *data) {
 	struct sway_output *output = data;
 
@@ -282,9 +313,12 @@ static int output_repaint_timer_handler(void *data) {
 	};
 
 	struct wlr_scene_output *scene_output = output->scene_output;
-	if (!wlr_scene_output_needs_frame(scene_output)) {
+	if (!wlr_scene_output_needs_frame(scene_output) ||
+			output_defer_cursor_frame(output)) {
 		return 0;
 	}
+
+	bool content_changed = wlr_scene_output_content_changed(scene_output);
 
 	struct wlr_output_state pending;
 	wlr_output_state_init(&pending);
@@ -305,6 +339,8 @@ static int output_repaint_timer_handler(void *data) {
 
 	if (!wlr_output_commit_state(output->wlr_output, &pending)) {
 		sway_log(SWAY_ERROR, "Page-flip failed on output %s", output->wlr_output->name);
+	} else if (content_changed) {
+		clock_gettime(CLOCK_MONOTONIC, &output->last_content_commit);
 	}
 	wlr_output_state_finish(&pending);
 	return 0;
