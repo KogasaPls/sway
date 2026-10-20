@@ -73,7 +73,7 @@ struct output_config *new_output_config(const char *name) {
 	oc->transform = -1;
 	oc->subpixel = WL_OUTPUT_SUBPIXEL_UNKNOWN;
 	oc->max_render_time = -1;
-	oc->adaptive_sync = -1;
+	oc->adaptive_sync = ADAPTIVE_SYNC_UNSET;
 	oc->render_bit_depth = RENDER_BIT_DEPTH_DEFAULT;
 	oc->color_profile = COLOR_PROFILE_DEFAULT;
 	oc->color_transform = NULL;
@@ -124,8 +124,8 @@ static void supersede_output_config(struct output_config *dst, struct output_con
 	if (src->max_render_time != -1) {
 		dst->max_render_time = -1;
 	}
-	if (src->adaptive_sync != -1) {
-		dst->adaptive_sync = -1;
+	if (src->adaptive_sync != ADAPTIVE_SYNC_UNSET) {
+		dst->adaptive_sync = ADAPTIVE_SYNC_UNSET;
 	}
 	if (src->render_bit_depth != RENDER_BIT_DEPTH_DEFAULT) {
 		dst->render_bit_depth = RENDER_BIT_DEPTH_DEFAULT;
@@ -201,7 +201,7 @@ static void merge_output_config(struct output_config *dst, struct output_config 
 	if (src->max_render_time != -1) {
 		dst->max_render_time = src->max_render_time;
 	}
-	if (src->adaptive_sync != -1) {
+	if (src->adaptive_sync != ADAPTIVE_SYNC_UNSET) {
 		dst->adaptive_sync = src->adaptive_sync;
 	}
 	if (src->render_bit_depth != RENDER_BIT_DEPTH_DEFAULT) {
@@ -534,8 +534,12 @@ static void queue_output_config(struct output_config *oc,
 	}
 
 	if (wlr_output->adaptive_sync_supported) {
-		if (oc && oc->adaptive_sync != -1) {
-			wlr_output_state_set_adaptive_sync_enabled(pending, oc->adaptive_sync == 1);
+		if (oc && oc->adaptive_sync == ADAPTIVE_SYNC_AUTO) {
+			wlr_output_state_set_adaptive_sync_enabled(pending,
+				output_auto_adaptive_sync_wanted(output));
+		} else if (oc && oc->adaptive_sync != ADAPTIVE_SYNC_UNSET) {
+			wlr_output_state_set_adaptive_sync_enabled(pending,
+				oc->adaptive_sync == ADAPTIVE_SYNC_ON);
 		} else {
 			wlr_output_state_set_adaptive_sync_enabled(pending, false);
 		}
@@ -686,6 +690,8 @@ static bool finalize_output_config(struct output_config *oc, struct sway_output 
 
 	output->max_render_time = oc && oc->max_render_time > 0 ? oc->max_render_time : 0;
 	output->allow_tearing = oc && oc->allow_tearing > 0;
+	output->adaptive_sync_auto = oc && oc->adaptive_sync == ADAPTIVE_SYNC_AUTO;
+	output->adaptive_sync_auto_rejected = false;
 	output->hdr = applied->image_description != NULL;
 
 	return true;
@@ -840,7 +846,7 @@ static bool search_adaptive_sync(struct search_context *ctx, size_t output_idx) 
 		return search_finish(ctx, output_idx);
 	}
 
-	if (cfg->config && cfg->config->adaptive_sync == 1) {
+	if (cfg->config && cfg->config->adaptive_sync == ADAPTIVE_SYNC_ON) {
 		wlr_output_state_set_adaptive_sync_enabled(state, true);
 		if (search_finish(ctx, output_idx)) {
 			return true;

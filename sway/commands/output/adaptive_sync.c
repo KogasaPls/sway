@@ -30,7 +30,12 @@ struct cmd_results *output_cmd_adaptive_sync(int argc, char **argv) {
 			sway_output->wlr_output->adaptive_sync_status == WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED;
 	}
 
-	config->handler_context.output_config->adaptive_sync = parse_boolean(argv[0], current_value);
+	enum adaptive_sync_mode *mode = &config->handler_context.output_config->adaptive_sync;
+	if (strcasecmp(argv[0], "auto") == 0) {
+		*mode = ADAPTIVE_SYNC_AUTO;
+	} else {
+		*mode = parse_boolean(argv[0], current_value) ? ADAPTIVE_SYNC_ON : ADAPTIVE_SYNC_OFF;
+	}
 
 	config->handler_context.leftovers.argc = argc - 1;
 	config->handler_context.leftovers.argv = argv + 1;
