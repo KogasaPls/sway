@@ -70,6 +70,8 @@ struct sway_output {
 	int max_render_time; // In milliseconds
 	struct wl_event_source *repaint_timer;
 
+	struct timespec last_content_commit;
+
 	bool allow_tearing;
 	bool hdr;
 };

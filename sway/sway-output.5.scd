@@ -163,6 +163,12 @@ must be separated by one space. For example:
 	adaptive sync can improve latency, but can cause flickering on some
 	hardware.
 
+	While adaptive sync is enabled, a frame that only moves the hardware cursor
+	waits for the next frame with new content, or until 1/30 of a second has
+	passed since the last one, so cursor motion over content running at 30 Hz
+	or more does not raise the refresh rate. Over slower or static content the
+	cursor is drawn without waiting.
+
 *output* <name> render_bit_depth 6|8|10
 	Controls the maximum color channel bit depth at which frames are
 	rendered; the default is currently 8 bits per channel.
