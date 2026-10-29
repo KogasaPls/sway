@@ -265,7 +265,7 @@ enum adaptive_sync_mode {
 	ADAPTIVE_SYNC_UNSET = -1,
 	ADAPTIVE_SYNC_OFF,
 	ADAPTIVE_SYNC_ON,
-	ADAPTIVE_SYNC_AUTO, // enabled while a fullscreen view is on the output
+	ADAPTIVE_SYNC_AUTO, // enabled for opted-in fullscreen views
 };
 
 enum render_bit_depth {
