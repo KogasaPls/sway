@@ -608,6 +608,9 @@ static void ipc_json_describe_view(struct sway_container *c, json_object *object
 
 	json_object_object_add(object, "max_render_time", json_object_new_int(c->view->max_render_time));
 
+	json_object_object_add(object, "allow_adaptive_sync",
+			json_object_new_boolean(c->view->allow_adaptive_sync));
+
 	json_object_object_add(object, "allow_tearing", json_object_new_boolean(view_can_tear(c->view)));
 
 	json_object_object_add(object, "shell", json_object_new_string(view_get_shell(c->view)));

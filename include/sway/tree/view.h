@@ -124,6 +124,8 @@ struct sway_view {
 
 	enum seat_config_shortcuts_inhibit shortcuts_inhibit;
 
+	bool allow_adaptive_sync; // User opt-in for output adaptive_sync auto
+
 	enum sway_view_tearing_mode tearing_mode;
 	enum wp_tearing_control_v1_presentation_hint tearing_hint;
 };

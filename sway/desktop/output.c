@@ -264,7 +264,8 @@ static struct sway_view *output_fullscreen_view(struct sway_output *output) {
 }
 
 bool output_auto_adaptive_sync_wanted(struct sway_output *output) {
-	return !server.session_lock.lock && output_fullscreen_view(output) != NULL;
+	struct sway_view *view = output_fullscreen_view(output);
+	return !server.session_lock.lock && view && view->allow_adaptive_sync;
 }
 
 static bool output_can_tear(struct sway_output *output) {
