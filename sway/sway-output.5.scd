@@ -158,9 +158,14 @@ must be separated by one space. For example:
 	Enables or disables adaptive synchronization (often referred to as Variable
 	Refresh Rate, or by the vendor-specific names FreeSync/G-Sync).
 
-	With *auto*, adaptive sync is enabled only while a fullscreen view is on
-	the output and the session is not locked, so the desktop keeps a fixed
-	refresh rate. *toggle* switches from the current state to *on* or *off*.
+	With *auto*, adaptive sync is enabled only while a fullscreen view opted
+	in with *allow_adaptive_sync yes* is on the output's active workspace and
+	the session is not locked. Windows are opted out by default. For example:
+		for_window [app_id="^gamescope$"] allow_adaptive_sync yes
+
+	The desktop and other fullscreen windows keep a fixed refresh rate.
+	*on* enables adaptive sync regardless of the per-window opt-in.
+	*toggle* switches from the current state to *on* or *off*.
 
 	Adaptive sync allows clients to submit frames a little too late without
 	having to wait a whole refresh period to display it on screen. Enabling

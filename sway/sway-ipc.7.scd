@@ -401,6 +401,10 @@ node and will have the following properties:
 |- shell
 :  string
 :  (Only windows) The shell of the window, such as _xdg\_shell_ or _xwayland_
+|- allow_adaptive_sync
+:  boolean
+:  (Only windows) Whether the window has opted into adaptive sync on outputs
+   using _adaptive_sync auto_. This is permission, not the current VRR status.
 |- inhibit_idle
 :  boolean
 :  (Only windows) Whether the window is inhibiting the idle state

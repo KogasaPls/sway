@@ -217,6 +217,19 @@ set|plus|minus|toggle <amount>
 	effect on the output the window is currently on. See *sway-output*(5) for
 	further details.
 
+*allow_adaptive_sync* yes|no|toggle
+	Opts the window into or out of variable refresh rate when its output uses
+	*adaptive_sync auto*. Windows are opted out by default. The window must
+	also be fullscreen on the output's active workspace and the session must
+	be unlocked. This setting does not affect outputs using *adaptive_sync on*
+	or *off*, and is independent of tearing hints and *allow_tearing*.
+
+	For example, to opt gamescope windows in:
+		for_window [app_id="^gamescope$"] allow_adaptive_sync yes
+
+	*toggle* reverses the window's opt-in. The opt-in follows the window when
+	it moves between workspaces or outputs. See *sway-output*(5).
+
 *allow_tearing* yes|no
 	Allows or disallows screen tearing as a result of immediate page flips
 	for a fullscreen application.
