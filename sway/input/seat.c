@@ -1256,9 +1256,23 @@ void seat_set_focus(struct sway_seat *seat, struct sway_node *node) {
 	// Prevents the layer from losing focus if it has keyboard exclusivity
 	if (seat->has_exclusive_layer) {
 		struct wlr_layer_surface_v1 *layer = seat->focused_layer;
-		seat_set_focus_layer(seat, NULL);
-		seat_set_workspace_focus(seat, node);
-		seat_set_focus_layer(seat, layer);
+		if (layer && node == seat_get_focus_inactive(seat, &root->node)) {
+			// The node already has focus beneath the layer. Releasing and
+			// retaking the layer would send the view an enter, leave and
+			// activation configure and the layer a leave and enter, and
+			// focus_follows_mouse always asks for this on every pointer
+			// motion. Only make sure the layer still holds the keyboard,
+			// in case an unmanaged xwayland surface took it.
+			if (!server.session_lock.lock &&
+					seat->wlr_seat->keyboard_state.focused_surface !=
+						layer->surface) {
+				seat_set_focus_surface(seat, layer->surface, false);
+			}
+		} else {
+			seat_set_focus_layer(seat, NULL);
+			seat_set_workspace_focus(seat, node);
+			seat_set_focus_layer(seat, layer);
+		}
 	} else if (seat->focused_layer) {
 		seat_set_focus_layer(seat, NULL);
 		seat_set_workspace_focus(seat, node);
