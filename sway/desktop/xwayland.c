@@ -56,7 +56,7 @@ static void unmanaged_handle_set_geometry(struct wl_listener *listener, void *da
 static bool unmanaged_may_take_focus(struct sway_seat *seat,
 		struct wlr_xwayland_surface *xsurface) {
 	// No view is focused while an exclusive layer holds the keyboard.
-	if (seat->has_exclusive_layer && seat->focused_layer) {
+	if (seat_has_exclusive_layer(seat)) {
 		return false;
 	}
 	struct sway_container *focus = seat_get_focused_container(seat);

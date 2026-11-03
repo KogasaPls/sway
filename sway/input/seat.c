@@ -1254,9 +1254,9 @@ static void seat_set_workspace_focus(struct sway_seat *seat, struct sway_node *n
 
 void seat_set_focus(struct sway_seat *seat, struct sway_node *node) {
 	// Prevents the layer from losing focus if it has keyboard exclusivity
-	if (seat->has_exclusive_layer) {
+	if (seat_has_exclusive_layer(seat)) {
 		struct wlr_layer_surface_v1 *layer = seat->focused_layer;
-		if (layer && node == seat_get_focus_inactive(seat, &root->node)) {
+		if (node == seat_get_focus_inactive(seat, &root->node)) {
 			// The node already has focus beneath the layer. Releasing and
 			// retaking the layer would send the view an enter, leave and
 			// activation configure and the layer a leave and enter, and
@@ -1313,6 +1313,13 @@ void seat_set_focus_surface(struct sway_seat *seat,
 	seat_tablet_pads_set_focus(seat, surface);
 }
 
+bool seat_has_exclusive_layer(struct sway_seat *seat) {
+	struct wlr_layer_surface_v1 *layer = seat->focused_layer;
+	return layer && layer->current.layer >= ZWLR_LAYER_SHELL_V1_LAYER_TOP &&
+		layer->current.keyboard_interactive ==
+			ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE;
+}
+
 void seat_set_focus_layer(struct sway_seat *seat,
 		struct wlr_layer_surface_v1 *layer) {
 	if (!layer && seat->focused_layer) {
@@ -1331,11 +1338,6 @@ void seat_set_focus_layer(struct sway_seat *seat,
 		return;
 	}
 	assert(layer->surface->mapped);
-	if (layer->current.layer >= ZWLR_LAYER_SHELL_V1_LAYER_TOP &&
-			layer->current.keyboard_interactive
-			== ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_EXCLUSIVE) {
-		seat->has_exclusive_layer = true;
-	}
 	if (seat->focused_layer == layer) {
 		return;
 	}
